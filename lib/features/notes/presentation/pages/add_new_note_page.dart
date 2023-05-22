@@ -1,12 +1,17 @@
+import 'dart:convert';
+
 import 'package:clean_architecture/features/notes/domain/entities/note_entity.dart';
 import 'package:clean_architecture/features/notes/presentation/cubit/note/note_cubit.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class AddNewNotePage extends StatefulWidget {
   final String uid;
+
   const AddNewNotePage({Key? key, required this.uid}) : super(key: key);
 
   @override
@@ -14,16 +19,10 @@ class AddNewNotePage extends StatefulWidget {
 }
 
 class _AddNewNotePageState extends State<AddNewNotePage> {
-  TextEditingController _noteTextController = TextEditingController();
-  GlobalKey<ScaffoldState> _scaffoldStateKey = GlobalKey<ScaffoldState>();
-
-  @override
-  void initState() {
-    _noteTextController.addListener(() {
-      setState(() {});
-    });
-    super.initState();
-  }
+  final TextEditingController _noteTextController = TextEditingController();
+  final GlobalKey<ScaffoldState> _scaffoldStateKey = GlobalKey<ScaffoldState>();
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  final Connectivity _connectivity = Connectivity();
 
   @override
   void dispose() {
@@ -40,57 +39,96 @@ class _AddNewNotePageState extends State<AddNewNotePage> {
       ),
       body: Container(
         padding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              "${DateFormat("dd MMM hh:mm a").format(DateTime.now())} | ${_noteTextController.text.length} Characters",
-              style:
-                  TextStyle(fontSize: 14, color: Colors.black.withOpacity(.5)),
-            ),
-            Expanded(
-              child: Scrollbar(
-                child: TextFormField(
-                  controller: _noteTextController,
-                  maxLines: null,
-                  decoration: InputDecoration(
-                      border: InputBorder.none, hintText: "start typing..."),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "${DateFormat("dd MMM hh:mm a").format(DateTime.now())} | ${_noteTextController.text.length} Characters",
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.black.withOpacity(.5),
                 ),
               ),
-            ),
-            InkWell(
-              onTap: _submitNewNote,
-              child: Container(
-                height: 45,
-                width: double.infinity,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
+              Expanded(
+                child: Scrollbar(
+                  child: TextFormField(
+                    controller: _noteTextController,
+                    maxLines: null,
+                    decoration: InputDecoration(
+                      border: InputBorder.none,
+                      hintText: "start typing...",
+                    ),
+                    validator: (value) {
+                      if (value!.isEmpty) {
+                        return 'Please enter some text';
+                      }
+                      return null;
+                    },
+                  ),
+                ),
+              ),
+              InkWell(
+                onTap: _submitNewNote,
+                child: Container(
+                  height: 45,
+                  width: double.infinity,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
                     color: Color.fromARGB(255, 156, 34, 255),
-                    borderRadius: BorderRadius.circular(8)),
-                child: Text(
-                  "Save",
-                  style: TextStyle(fontSize: 18, color: Colors.white),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    "Save",
+                    style: TextStyle(fontSize: 18, color: Colors.white),
+                  ),
                 ),
               ),
-            )
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
-  void _submitNewNote() {
-    if (_noteTextController.text.isEmpty) {
-      // snackBarError(scaffoldState: _scaffoldStateKey, msg: "type something");
+  void _submitNewNote() async {
+    if (!_formKey.currentState!.validate()) {
       return;
     }
-    BlocProvider.of<NoteCubit>(context).addNote(
+
+    final connectivityResult = await _connectivity.checkConnectivity();
+    if (connectivityResult == ConnectivityResult.none) {
+      // No hay conexión a Internet, guardar nota localmente
+      _saveNoteLocally();
+      return;
+    }
+
+    final noteCubit = context.read<NoteCubit>();
+
+    noteCubit.addNote(
       note: NotesEntity(
         note: _noteTextController.text,
         time: Timestamp.now(),
         uid: widget.uid,
       ),
     );
+
+    Future.delayed(Duration(seconds: 1), () {
+      Navigator.pop(context);
+    });
+  }
+
+  void _saveNoteLocally() async {
+    final sharedPreferences = await SharedPreferences.getInstance();
+
+    final localNotesJson = sharedPreferences.getString('localNotes') ?? '[]';
+    final localNotesList = json.decode(localNotesJson) as List<dynamic>;
+    final localNotes = localNotesList.map((json) => json.toString()).toList();
+    localNotes.add(_noteTextController.text);
+
+    final updatedNotesJson = json.encode(localNotes);
+    sharedPreferences.setString('localNotes', updatedNotesJson);
 
     Future.delayed(Duration(seconds: 1), () {
       Navigator.pop(context);

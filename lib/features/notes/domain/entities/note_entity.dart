@@ -10,6 +10,23 @@ class NotesEntity extends Equatable {
   NotesEntity({this.noteId, this.note, this.time, this.uid});
 
   @override
-  // TODO: implement props
-  List<Object?> get props => [note, noteId, time, uid];
+  List<Object?> get props => [noteId, note, time, uid];
+
+  Map<String, dynamic> toJson() {
+    return {
+      'noteId': noteId,
+      'note': note,
+      'time': time,
+      'uid': uid,
+    };
+  }
+
+  factory NotesEntity.fromJson(Map<String, dynamic> json) {
+    return NotesEntity(
+      noteId: json['noteId'],
+      note: json['note'],
+      time: json['time'],
+      uid: json['uid'],
+    );
+  }
 }

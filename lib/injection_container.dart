@@ -20,8 +20,10 @@ import 'package:clean_architecture/features/users/domain/usecases/sign_up_usecas
 import 'package:clean_architecture/features/users/presentation/cubit/auth/auth_cubit.dart';
 import 'package:clean_architecture/features/users/presentation/cubit/user/user_cubit.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:get_it/get_it.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 GetIt sl = GetIt.instance;
 
@@ -41,6 +43,8 @@ Future<void> init() async {
         getNotesUseCase: sl.call(),
         deleteNoteUseCase: sl.call(),
         addNewNoteUseCase: sl.call(),
+        sharedPreferences: sl.call(),
+        connectivity: sl.call(),
       ));
 
   //useCase
@@ -80,7 +84,13 @@ Future<void> init() async {
   //External
   final auth = FirebaseAuth.instance;
   final fireStore = FirebaseFirestore.instance;
+  final sharedPreferences = await SharedPreferences.getInstance();
+  final connectivity = Connectivity();
 
   sl.registerLazySingleton(() => auth);
   sl.registerLazySingleton(() => fireStore);
+
+  sl.registerLazySingleton(() => sharedPreferences);
+
+  sl.registerLazySingleton(() => connectivity);
 }
