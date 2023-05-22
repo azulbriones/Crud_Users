@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:clean_architecture/app_const.dart';
+import 'package:clean_architecture/features/notes/domain/entities/note_entity.dart';
 import 'package:clean_architecture/features/notes/presentation/cubit/note/note_cubit.dart';
 import 'package:clean_architecture/features/notes/presentation/cubit/note/note_state.dart';
 import 'package:clean_architecture/features/users/presentation/cubit/auth/auth_cubit.dart';
@@ -19,6 +22,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final Connectivity _connectivity = Connectivity();
+  late StreamSubscription<ConnectivityResult> _connectivitySubscription;
 
   @override
   void initState() {
@@ -26,11 +30,17 @@ class _HomePageState extends State<HomePage> {
     BlocProvider.of<NoteCubit>(context).getNotes(uid: widget.uid);
     clearSharedPrefs();
 
-    _connectivity.onConnectivityChanged.listen((ConnectivityResult result) {
-      if (result != ConnectivityResult.none) {
-        _handleConnectivityChange();
-      }
+    _connectivitySubscription =
+        _connectivity.onConnectivityChanged.listen((result) {
+      _handleConnectivityChange(result);
     });
+  }
+
+  @override
+  void dispose() {
+    _connectivitySubscription.cancel();
+
+    super.dispose();
   }
 
   Future<void> clearSharedPrefs() async {
@@ -38,16 +48,13 @@ class _HomePageState extends State<HomePage> {
     prefs.remove('newLaunch');
   }
 
-  Future<void> _handleConnectivityChange() async {
+  Future<void> _handleConnectivityChange(ConnectivityResult result) async {
     final noteCubit = BlocProvider.of<NoteCubit>(context);
-    final hasConnectivity = await _connectivity.checkConnectivity();
 
-    if (hasConnectivity == ConnectivityResult.none) {
-      return;
+    if (result != ConnectivityResult.none) {
+      await noteCubit.syncChanges();
+      noteCubit.getNotes(uid: widget.uid);
     }
-
-    await noteCubit.sendPendingOperations();
-    noteCubit.getNotes(uid: widget.uid);
   }
 
   @override
@@ -78,11 +85,13 @@ class _HomePageState extends State<HomePage> {
             if (noteState.notes.isEmpty) {
               return _noNotesWidget();
             } else {
-              return _bodyWidget(noteState);
+              return _bodyWidget(noteState.notes);
             }
+          } else if (noteState is NoteFailure) {
+            return Center(child: Text("Failed to load notes."));
+          } else {
+            return Center(child: CircularProgressIndicator());
           }
-
-          return Center(child: CircularProgressIndicator());
         },
       ),
     );
@@ -104,86 +113,84 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _bodyWidget(NoteLoaded noteLoadedState) {
+  Widget _bodyWidget(List<NotesEntity> notes) {
     return Column(
       children: [
         Expanded(
-          child: noteLoadedState.notes.isEmpty
-              ? _noNotesWidget()
-              : GridView.builder(
-                  itemCount: noteLoadedState.notes.length,
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    childAspectRatio: 1.2,
-                  ),
-                  itemBuilder: (_, index) {
-                    final note = noteLoadedState.notes[index];
+          child: GridView.builder(
+            itemCount: notes.length,
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              childAspectRatio: 1.2,
+            ),
+            itemBuilder: (_, index) {
+              final note = notes[index];
 
-                    return GestureDetector(
-                      onTap: () => Navigator.pushNamed(
-                          context, PageConst.updateNotePage,
-                          arguments: note),
-                      onLongPress: () {
-                        showDialog(
-                          context: context,
-                          builder: (BuildContext context) {
-                            return AlertDialog(
-                              title: Text("Delete Note"),
-                              content: Text(
-                                  "Are you sure you want to delete this note?"),
-                              actions: [
-                                TextButton(
-                                  child: Text("Delete"),
-                                  onPressed: () {
-                                    BlocProvider.of<NoteCubit>(context)
-                                        .deleteNote(note: note);
-                                    Navigator.pop(context);
-                                  },
-                                ),
-                                TextButton(
-                                  child: Text("No"),
-                                  onPressed: () => Navigator.pop(context),
-                                ),
-                              ],
-                            );
-                          },
-                        );
-                      },
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(8),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(.2),
-                              blurRadius: 2,
-                              spreadRadius: 2,
-                              offset: Offset(0, 1.5),
-                            ),
-                          ],
-                        ),
-                        padding: EdgeInsets.all(10),
-                        margin: EdgeInsets.all(6),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              "${noteLoadedState.notes[index].note}",
-                              maxLines: 6,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            SizedBox(height: 4),
-                            Text(
-                              DateFormat("dd MMM yyy hh:mm a")
-                                  .format(note.time!.toDate()),
-                            ),
-                          ],
-                        ),
+              return GestureDetector(
+                onTap: () => Navigator.pushNamed(
+                    context, PageConst.updateNotePage,
+                    arguments: note),
+                onLongPress: () {
+                  showDialog(
+                    context: context,
+                    builder: (BuildContext context) {
+                      return AlertDialog(
+                        title: Text("Delete Note"),
+                        content:
+                            Text("Are you sure you want to delete this note?"),
+                        actions: [
+                          TextButton(
+                            child: Text("Delete"),
+                            onPressed: () {
+                              BlocProvider.of<NoteCubit>(context)
+                                  .deleteNote(note: note);
+                              Navigator.pop(context);
+                            },
+                          ),
+                          TextButton(
+                            child: Text("No"),
+                            onPressed: () => Navigator.pop(context),
+                          ),
+                        ],
+                      );
+                    },
+                  );
+                },
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(.2),
+                        blurRadius: 2,
+                        spreadRadius: 2,
+                        offset: Offset(0, 1.5),
                       ),
-                    );
-                  },
+                    ],
+                  ),
+                  padding: EdgeInsets.all(10),
+                  margin: EdgeInsets.all(6),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        "${note.note}",
+                        maxLines: 6,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        DateFormat("dd MMM yyy hh:mm a")
+                            .format(note.time!.toDate()),
+                      ),
+                    ],
+                  ),
                 ),
+              );
+            },
+          ),
         ),
       ],
     );

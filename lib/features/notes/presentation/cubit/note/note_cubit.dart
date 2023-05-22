@@ -10,6 +10,32 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+enum Operation { delete, update }
+
+class OperationData {
+  final Operation operation;
+  final NotesEntity note;
+
+  OperationData({required this.operation, required this.note});
+
+  Map<String, dynamic> toJson() {
+    return {
+      'operation': operation.toString(),
+      'note': note.toJson(),
+    };
+  }
+
+  factory OperationData.fromJson(Map<String, dynamic> json) {
+    final operation = json['operation'] as String;
+    final note = NotesEntity.fromJson(json['note']);
+    return OperationData(
+      operation:
+          operation == 'Operation.delete' ? Operation.delete : Operation.update,
+      note: note,
+    );
+  }
+}
+
 class NoteCubit extends Cubit<NoteState> {
   final GetNotesUseCase getNotesUseCase;
   final AddNewNoteUseCase addNewNoteUseCase;
@@ -36,14 +62,13 @@ class NoteCubit extends Cubit<NoteState> {
       final connectivityResult = await _connectivity.checkConnectivity();
       if (connectivityResult == ConnectivityResult.none) {
         final localNotes = await getLocalNotes();
-        emit(NoteLoaded(notes: localNotes));
-        emit(NoteFailure());
+        setNotes(localNotes);
         return;
       }
 
       try {
         getNotesUseCase.call(uid).listen((notes) {
-          emit(NoteLoaded(notes: notes));
+          setNotes(notes);
         });
       } on SocketException catch (_) {
         emit(NoteFailure());
@@ -65,6 +90,7 @@ class NoteCubit extends Cubit<NoteState> {
       }
 
       await addNewNoteUseCase.call(note);
+      await syncChanges();
     } catch (_) {
       emit(NoteFailure());
     }
@@ -74,12 +100,13 @@ class NoteCubit extends Cubit<NoteState> {
     try {
       final connectivityResult = await _connectivity.checkConnectivity();
       if (connectivityResult == ConnectivityResult.none) {
-        await saveOperationLocally(Operation.update, note);
+        await saveNoteLocally(note);
         emit(NoteFailure());
         return;
       }
 
       await updateNoteUseCase.call(note);
+      await syncChanges();
     } catch (_) {
       emit(NoteFailure());
     }
@@ -95,87 +122,93 @@ class NoteCubit extends Cubit<NoteState> {
       }
 
       await deleteNoteUseCase.call(note);
+      await syncChanges();
     } catch (_) {
       emit(NoteFailure());
     }
   }
 
-  Future<void> sendPendingOperations() async {
-    final localOperations = await getLocalOperations();
-    for (final operationData in localOperations) {
-      try {
-        if (operationData.operation == Operation.delete) {
-          await deleteNoteUseCase.call(operationData.note);
-        } else if (operationData.operation == Operation.update) {
-          await updateNoteUseCase.call(operationData.note);
-        }
-        localOperations.remove(operationData);
-        await saveLocalOperations(localOperations);
-      } catch (_) {
-        // Failed to send the operation to the remote service, keep it locally for retry
-      }
+  Future<List<NotesEntity>> getLocalNotes() async {
+    final notesJson = _sharedPreferences.getString('local_notes');
+    if (notesJson != null) {
+      final notesData = jsonDecode(notesJson) as List<dynamic>;
+      final localNotes =
+          notesData.map((data) => NotesEntity.fromJson(data)).toList();
+      return localNotes;
     }
+    return [];
   }
 
   Future<void> saveNoteLocally(NotesEntity note) async {
     final localNotes = await getLocalNotes();
     localNotes.add(note);
-    await saveLocalNotes(localNotes);
+
+    final notesData = localNotes.map((note) => note.toJson()).toList();
+    final notesJson = jsonEncode(notesData);
+    await _sharedPreferences.setString('local_notes', notesJson);
   }
 
   Future<void> saveOperationLocally(
       Operation operation, NotesEntity note) async {
-    final localOperations = await getLocalOperations();
-    localOperations.add(OperationData(operation: operation, note: note));
-    await saveLocalOperations(localOperations);
+    final operationData = OperationData(operation: operation, note: note);
+    final operationsJson = _sharedPreferences.getString('local_operations');
+    List<OperationData> operations = [];
+    if (operationsJson != null) {
+      final operationsData = jsonDecode(operationsJson) as List<dynamic>;
+      operations =
+          operationsData.map((data) => OperationData.fromJson(data)).toList();
+    }
+    operations.add(operationData);
+
+    final operationsData =
+        operations.map((operation) => operation.toJson()).toList();
+    final operationsJsonAux = jsonEncode(operationsData);
+    await _sharedPreferences.setString('local_operations', operationsJsonAux);
   }
 
-  Future<List<NotesEntity>> getLocalNotes() async {
-    final notesJson = _sharedPreferences.getString('localNotes') ?? '[]';
-    final notesList = json.decode(notesJson) as List<dynamic>;
-    return notesList.map((json) => NotesEntity.fromJson(json)).toList();
+  Future<void> syncChanges() async {
+    final connectivityResult = await _connectivity.checkConnectivity();
+    if (connectivityResult != ConnectivityResult.none) {
+      final operationsJson = _sharedPreferences.getString('local_operations');
+      if (operationsJson != null) {
+        final operationsData = jsonDecode(operationsJson) as List<dynamic>;
+        final operations =
+            operationsData.map((data) => OperationData.fromJson(data)).toList();
+
+        for (final operation in operations) {
+          try {
+            if (operation.operation == Operation.delete) {
+              await deleteNoteUseCase.call(operation.note);
+            } else if (operation.operation == Operation.update) {
+              await updateNoteUseCase.call(operation.note);
+            }
+          } catch (_) {
+            // Error al sincronizar la operación, se mantiene en almacenamiento local
+            continue;
+          }
+        }
+
+        // Se eliminan las operaciones sincronizadas del almacenamiento local
+        await _sharedPreferences.remove('local_operations');
+      }
+
+      // Obtener las notas locales pendientes y enviarlas al servidor
+      final localNotes = await getLocalNotes();
+      for (final note in localNotes) {
+        try {
+          await addNewNoteUseCase.call(note);
+        } catch (_) {
+          // Error al sincronizar la nota, se mantiene en almacenamiento local
+          continue;
+        }
+      }
+
+      // Se eliminan las notas locales pendientes del almacenamiento local
+      await _sharedPreferences.remove('local_notes');
+    }
   }
 
-  Future<void> saveLocalNotes(List<NotesEntity> notes) async {
-    final notesJson = json.encode(notes);
-    await _sharedPreferences.setString('localNotes', notesJson);
-  }
-
-  Future<List<OperationData>> getLocalOperations() async {
-    final operationsJson =
-        _sharedPreferences.getString('localOperations') ?? '[]';
-    final operationsList = json.decode(operationsJson) as List<dynamic>;
-    return operationsList.map((json) => OperationData.fromJson(json)).toList();
-  }
-
-  Future<void> saveLocalOperations(List<OperationData> operations) async {
-    final operationsJson = json.encode(operations);
-    await _sharedPreferences.setString('localOperations', operationsJson);
+  Future<void> setNotes(List<NotesEntity> notes) async {
+    emit(NoteLoaded(notes: notes));
   }
 }
-
-class OperationData {
-  final Operation operation;
-  final NotesEntity note;
-
-  OperationData({required this.operation, required this.note});
-
-  Map<String, dynamic> toJson() {
-    return {
-      'operation': operation.toString(),
-      'note': note.toJson(),
-    };
-  }
-
-  factory OperationData.fromJson(Map<String, dynamic> json) {
-    final operation = json['operation'] as String;
-    final note = NotesEntity.fromJson(json['note']);
-    return OperationData(
-      operation:
-          operation == 'Operation.delete' ? Operation.delete : Operation.update,
-      note: note,
-    );
-  }
-}
-
-enum Operation { delete, update }

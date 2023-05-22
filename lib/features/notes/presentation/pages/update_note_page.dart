@@ -18,14 +18,24 @@ class UpdateNotePage extends StatefulWidget {
 class _UpdateNotePageState extends State<UpdateNotePage> {
   late TextEditingController _noteTextController;
   final Connectivity _connectivity = Connectivity();
+  String _tempNoteText = '';
 
   @override
   void initState() {
     super.initState();
     _noteTextController = TextEditingController(text: widget.noteEntity.note);
     _noteTextController.addListener(() {
-      setState(() {});
+      _tempNoteText = _noteTextController.text;
     });
+    _tempNoteText = _noteTextController.text;
+
+    _checkConnectivity();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _noteTextController.text = _tempNoteText;
   }
 
   @override
@@ -89,7 +99,8 @@ class _UpdateNotePageState extends State<UpdateNotePage> {
   void _submitUpdateNote() async {
     final connectivityResult = await _connectivity.checkConnectivity();
     if (connectivityResult == ConnectivityResult.none) {
-      // No hay conexión a Internet, mostrar mensaje de error o tomar alguna acción
+      // No hay conexión a Internet, mostrar contenido local temporalmente
+      _showLocalContent();
       return;
     }
 
@@ -104,8 +115,45 @@ class _UpdateNotePageState extends State<UpdateNotePage> {
       ),
     );
 
-    Future.delayed(Duration(seconds: 1), () {
+    // Mostrar un indicador de carga o mensaje de éxito aquí
+
+    try {
+      // Simular un tiempo de espera para mostrar el indicador de carga
+      await Future.delayed(Duration(seconds: 1));
+
+      // Actualizar la nota en el servidor
+
+      // Mostrar mensaje de éxito y navegar de vuelta
       Navigator.pop(context);
-    });
+    } catch (error) {
+      // Mostrar mensaje de error en caso de fallo de actualización en el servidor
+    }
+  }
+
+  void _showLocalContent() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text("No hay conexión"),
+          content: Text("Mostrando contenido local"),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: Text("OK"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _checkConnectivity() async {
+    final connectivityResult = await _connectivity.checkConnectivity();
+    if (connectivityResult == ConnectivityResult.none) {
+      // No hay conexión a Internet, manejar el caso sin conexión aquí
+    }
   }
 }

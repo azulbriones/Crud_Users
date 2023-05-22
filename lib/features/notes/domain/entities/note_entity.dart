@@ -9,6 +9,15 @@ class NotesEntity extends Equatable {
 
   NotesEntity({this.noteId, this.note, this.time, this.uid});
 
+  // Implementación del método copyWith
+  NotesEntity copyWith({String? id, String? text, Timestamp? time}) {
+    return NotesEntity(
+      noteId: id ?? this.noteId,
+      note: text ?? this.note,
+      time: time ?? this.time,
+    );
+  }
+
   @override
   List<Object?> get props => [noteId, note, time, uid];
 

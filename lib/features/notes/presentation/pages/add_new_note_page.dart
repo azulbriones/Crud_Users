@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:clean_architecture/features/notes/domain/entities/note_entity.dart';
 import 'package:clean_architecture/features/notes/presentation/cubit/note/note_cubit.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -20,7 +18,6 @@ class AddNewNotePage extends StatefulWidget {
 
 class _AddNewNotePageState extends State<AddNewNotePage> {
   final TextEditingController _noteTextController = TextEditingController();
-  final GlobalKey<ScaffoldState> _scaffoldStateKey = GlobalKey<ScaffoldState>();
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   final Connectivity _connectivity = Connectivity();
 
@@ -33,7 +30,6 @@ class _AddNewNotePageState extends State<AddNewNotePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      key: _scaffoldStateKey,
       appBar: AppBar(
         title: Text("New note"),
       ),
@@ -114,24 +110,21 @@ class _AddNewNotePageState extends State<AddNewNotePage> {
       ),
     );
 
-    Future.delayed(Duration(seconds: 1), () {
-      Navigator.pop(context);
-    });
+    Navigator.pop(context);
   }
 
   void _saveNoteLocally() async {
-    final sharedPreferences = await SharedPreferences.getInstance();
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    List<String>? localNotes = prefs.getStringList('localNotes');
 
-    final localNotesJson = sharedPreferences.getString('localNotes') ?? '[]';
-    final localNotesList = json.decode(localNotesJson) as List<dynamic>;
-    final localNotes = localNotesList.map((json) => json.toString()).toList();
-    localNotes.add(_noteTextController.text);
+    if (localNotes == null) {
+      localNotes = [_noteTextController.text];
+    } else {
+      localNotes.add(_noteTextController.text);
+    }
 
-    final updatedNotesJson = json.encode(localNotes);
-    sharedPreferences.setString('localNotes', updatedNotesJson);
+    prefs.setStringList('localNotes', localNotes);
 
-    Future.delayed(Duration(seconds: 1), () {
-      Navigator.pop(context);
-    });
+    Navigator.pop(context);
   }
 }
